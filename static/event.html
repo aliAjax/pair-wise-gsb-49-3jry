@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>巨灾事件台账详情</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
+    main { max-width: 1000px; margin: auto; }
+    h2 { margin-top: 2rem; font-size: 1.1rem; }
+    button { padding: .55rem .9rem; cursor: pointer; }
+    input { padding: .5rem .7rem; min-width: 220px; }
+    table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+    th, td { border: 1px solid #d9dee3; padding: .45rem .6rem; text-align: left; font-size: .92rem; }
+    th { background: #f4f6f8; }
+    .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1rem; }
+    .card { background: #f4f6f8; border-radius: 8px; padding: .8rem 1rem; }
+    .card .label { color: #5b6770; font-size: .8rem; }
+    .card .value { font-size: 1.15rem; font-weight: 600; margin-top: .2rem; }
+    .card.outstanding { background: #fff4e0; }
+    .badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .8rem; }
+    .pending_evidence { background: #fde2e0; color: #a1261f; }
+    .admitted { background: #e3f2e5; color: #1d6b2e; }
+    .settled { background: #e6ecf5; color: #26406b; }
+    .rejected { background: #ececec; color: #666; }
+    .hint { color: #5b6770; font-size: .85rem; }
+    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>巨灾事件台账详情</h1>
+  <div class="row">
+    <input id="eventId" placeholder="事件编号，如 CAT-2026-01">
+    <button id="load">加载事件</button>
+    <a href="/">返回首页</a>
+  </div>
+  <p class="hint">首次报案登记发生时刻、预估总损失和报送人；后续赔案自动追加到同一事件。</p>
+
+  <div class="cards" id="cards"></div>
+
+  <h2>赔案清单</h2>
+  <table>
+    <thead>
+      <tr><th>赔案号</th><th>合约</th><th>状态</th><th>预估损失</th><th>摊回金额</th><th>合约层容量</th></tr>
+    </thead>
+    <tbody id="claims"></tbody>
+  </table>
+
+  <h2>合约层余额</h2>
+  <table>
+    <thead>
+      <tr><th>合约</th><th>层容量</th><th>已占用</th><th>余额</th></tr>
+    </thead>
+    <tbody id="balances"></tbody>
+  </table>
+
+  <h2>补证下调</h2>
+  <div class="row">
+    <input id="newEstimate" type="number" min="0" step="0.01" placeholder="新的预估总损失（必须低于当前值）">
+    <button id="supplement">提交补证</button>
+  </div>
+  <pre id="output">输入事件编号后点击加载。</pre>
+</main>
+<script>
+const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo","Content-Type":"application/json"};
+const STATUS_LABELS = {
+  pending_evidence: "待补证",
+  admitted: "可核定",
+  settled: "已结算",
+  rejected: "已拒绝"
+};
+let currentEventId = "";
+
+function money(value) {
+  return Number(value).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function card(label, value, extraClass) {
+  return `<div class="card ${extraClass || ""}"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+function render(summary) {
+  document.getElementById("cards").innerHTML =
+    card("事件编号", summary.event_id) +
+    card("发生时刻", summary.occurred_at) +
+    card("报送人", summary.reported_by) +
+    card("预估总损失", money(summary.estimated_total_loss)) +
+    card("未结金额", money(summary.outstanding_total), "outstanding") +
+    card(`待补证赔案 ${summary.pending_evidence_count} / 共 ${summary.claim_count} 件`, money(summary.settled_total) + " 已结算");
+
+  document.getElementById("claims").innerHTML = summary.claims.map(c =>
+    `<tr>
+      <td>${c.claim_number}</td>
+      <td>${c.reference}（#${c.record_id}，${c.record_state}）</td>
+      <td><span class="badge ${c.status}">${STATUS_LABELS[c.status] || c.status}</span></td>
+      <td>${money(c.estimated_loss)}</td>
+      <td>${money(c.recoverable_amount)}</td>
+      <td>${money(c.layer_capacity)}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="hint">暂无赔案</td></tr>`;
+
+  document.getElementById("balances").innerHTML = summary.balances.map(b =>
+    `<tr><td>${b.reference}（#${b.record_id}）</td><td>${money(b.capacity)}</td><td>${money(b.used)}</td><td>${money(b.remaining)}</td></tr>`
+  ).join("") || `<tr><td colspan="4" class="hint">暂无合约</td></tr>`;
+
+  document.getElementById("output").textContent = JSON.stringify(summary, null, 2);
+}
+
+async function load() {
+  currentEventId = document.getElementById("eventId").value.trim();
+  if (!currentEventId) return;
+  const response = await fetch("/api/events/" + encodeURIComponent(currentEventId), {headers});
+  const data = await response.json();
+  if (!response.ok) {
+    document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+    return;
+  }
+  render(data);
+}
+
+async function supplement() {
+  if (!currentEventId) { await load(); }
+  const value = parseFloat(document.getElementById("newEstimate").value);
+  const response = await fetch("/api/events/" + encodeURIComponent(currentEventId) + "/supplement", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({estimated_total_loss: value})
+  });
+  const data = await response.json();
+  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+  if (response.ok) render(data);
+}
+
+document.getElementById("load").onclick = load;
+document.getElementById("supplement").onclick = supplement;
+document.getElementById("eventId").addEventListener("keydown", e => { if (e.key === "Enter") load(); });
+
+const params = new URLSearchParams(location.search);
+if (params.get("event_id")) {
+  document.getElementById("eventId").value = params.get("event_id");
+  load();
+}
+</script>
+</body>
+</html>

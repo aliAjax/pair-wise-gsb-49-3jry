@@ -7,6 +7,7 @@ from .domain import Actor, Conflict, ValidationError, boolean, choice, integer, 
 INITIAL_STATE = "quoted"
 CREATE_ROLES = {'underwriter'}
 ACTION_ROLES = {'bind': {'underwriter'}, 'submit_claim': {'claims_officer'}, 'calculate': {'claims_officer'}, 'settle': {'finance'}, 'reject': {'finance', 'claims_officer'}}
+EVENT_ACTION_ROLES = {'report_event': {'claims_officer'}, 'append_event_claim': {'claims_officer'}, 'supplement_event': {'claims_officer'}}
 TRANSITIONS = {'bind': {'quoted': 'bound'}, 'submit_claim': {'bound': 'claim_submitted'}, 'calculate': {'claim_submitted': 'calculated'}, 'settle': {'calculated': 'settled'}, 'reject': {'claim_submitted': 'rejected', 'calculated': 'rejected'}}
 
 
@@ -17,6 +18,8 @@ class DomainRules:
         all_roles = set(CREATE_ROLES)
         for roles in ACTION_ROLES.values():
             all_roles.update(roles)
+        for roles in EVENT_ACTION_ROLES.values():
+            all_roles.update(roles)
         return role == "admin" or role in all_roles
 
     def role_can_create(self, role: str) -> bool:
@@ -24,6 +27,9 @@ class DomainRules:
 
     def role_can_action(self, role: str, action: str) -> bool:
         return role == "admin" or role in ACTION_ROLES.get(action, set())
+
+    def role_can_event_action(self, role: str, action: str) -> bool:
+        return role == "admin" or role in EVENT_ACTION_ROLES.get(action, set())
 
     def validate_create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         p = dict(payload)

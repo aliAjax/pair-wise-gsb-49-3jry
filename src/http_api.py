@@ -12,6 +12,9 @@ from .domain import Actor, DomainError, PermissionDenied, ValidationError
 RECORD_RE = re.compile(r"^/api/records/(\d+)$")
 ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
 AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+EVENT_RE = re.compile(r"^/api/events/([A-Za-z0-9_-]+)$")
+EVENT_CLAIMS_RE = re.compile(r"^/api/events/([A-Za-z0-9_-]+)/claims$")
+EVENT_SUPPLEMENT_RE = re.compile(r"^/api/events/([A-Za-z0-9_-]+)/supplement$")
 
 
 def make_handler(service: Any, static_dir: Path):
@@ -71,6 +74,17 @@ def make_handler(service: Any, static_dir: Path):
                     page = (static_dir / "index.html").read_bytes()
                     self._send(200, page, "text/html; charset=utf-8")
                     return
+                if parsed.path == "/event":
+                    page = (static_dir / "event.html").read_bytes()
+                    self._send(200, page, "text/html; charset=utf-8")
+                    return
+                if parsed.path == "/api/events":
+                    self._send(200, {"items": service.list_event_summaries(self._actor())})
+                    return
+                match = EVENT_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.get_event_summary(self._actor(), match.group(1)))
+                    return
                 if parsed.path == "/api/records":
                     query = parse_qs(parsed.query)
                     records = service.list_records(self._actor(), state=query.get("state", [None])[0], limit=int(query.get("limit", ["100"])[0]))
@@ -95,6 +109,17 @@ def make_handler(service: Any, static_dir: Path):
             try:
                 parsed = urlparse(self.path)
                 body = self._body()
+                if parsed.path == "/api/events":
+                    self._send(201, service.report_event(self._actor(), body))
+                    return
+                match = EVENT_CLAIMS_RE.match(parsed.path)
+                if match:
+                    self._send(201, service.append_event_claim(self._actor(), match.group(1), body))
+                    return
+                match = EVENT_SUPPLEMENT_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.supplement_event(self._actor(), match.group(1), body))
+                    return
                 if parsed.path == "/api/records":
                     record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
                     self._send(201, record)
