@@ -7,11 +7,15 @@
 - `app.py`：命令行参数、依赖组装和服务启动。
 - `src/domain.py`：领域数据类型、错误和基础校验。
 - `src/rules.py`：状态转换、分层摊回、赔偿限额和恢复保费和冲突检查。
+- `src/event_rules.py`：事件报案校验、事件汇总和余额计算（容量、未结、待补证）。
+- `src/event_store.py`：事件通知台账的SQLite保存（登记表与报案/补证历史表）。
 - `src/repository.py`：SQLite建表、事务和查询。
 - `src/service.py`：用例编排、权限检查、乐观并发和审计。
 - `src/http_api.py`：HTTP路由与统一错误响应。
 - `src/audit.py`：事件时间线。
 - `static/index.html`：最小演示页面。
+- `static/events.html`：事件通知台账列表与首次报案登记。
+- `static/event.html`：事件详情页（余额、赔案清单、补证）。
 - `tests/`：完整流程、规则计算和失败场景测试。
 
 ## 启动
@@ -32,6 +36,15 @@ python3 app.py --db ./data.db --port 8325
 - `GET /api/stats`：状态统计。
 - `POST /api/records`：创建记录，请求体为`{"reference":"...","data":{...}}`。
 - `POST /api/records/{id}/actions/{action}`：执行业务动作，请求体为`{"expected_version":1,"data":{...}}`。
+- `GET /events`、`/event?id={id}`：事件台账列表页与事件详情页。
+- `GET /api/events`：事件台账列表，逐事件给出余额计算与赔案汇总。
+- `GET /api/events/{id}`：事件详情，含登记信息、余额、赔案清单和报案/补证历史。
+- `POST /api/events`：首次报案登记，请求体为`{"data":{"event_id":"...","occurred_at":"...","estimated_total_loss":0}}`，报送人取`X-User-Id`；同事件重复登记返回冲突，后续赔案经`submit_claim`的`event_id`自动追加到已有事件。
+- `POST /api/events/{id}/actions/supplement`：补证调整预估总损失，请求体为`{"expected_version":1,"data":{"estimated_total_loss":0,"note":"..."}}`。
+
+## 事件通知台账
+
+巨灾事件第一次报案时登记发生时刻、预估总损失和报送人，后续赔案按`event_id`追加到同一事件。事件容量为各合约`层宽×分保比例`之和；预估总损失超过容量时事件进入`待补证`，超出部分记为待补证金额，该事件下赔案不能核定（`calculate`返回冲突）。补证把预估下调到容量内后事件恢复正常、核定自动放行，已结算赔案不受影响。台账持久化在SQLite中，重启后可按事件查看未结金额和赔案清单。
 
 除`/health`和`/`外，请求需提供`X-User-Id`、`X-Role`，可选`X-Org`。
 

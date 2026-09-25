@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>事件详情 - 再保险合约与巨灾暴露管理</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
+    main { max-width: 1080px; margin: auto; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border: 1px solid #d7dee6; padding: .45rem .6rem; text-align: left; font-size: .92rem; }
+    th { background: #f4f6f8; }
+    button { padding: .55rem .9rem; cursor: pointer; }
+    input { padding: .45rem; }
+    .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+    .card { background: #f4f6f8; border-radius: 8px; padding: .8rem 1rem; min-width: 9rem; }
+    .card .num { font-size: 1.15rem; font-weight: 600; }
+    .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    .pending { color: #b23b3b; font-weight: 600; }
+    .normal { color: #1c7a3d; font-weight: 600; }
+    #message { color: #b23b3b; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>事件详情</h1>
+  <p><a href="/events">返回事件台账</a></p>
+  <div id="overview"></div>
+  <div class="cards" id="balance"></div>
+  <h2>补证</h2>
+  <div class="row">
+    <input id="new_estimate" type="number" min="0" step="0.01" placeholder="调整后预估总损失">
+    <input id="note" placeholder="补证说明">
+    <button id="supplement">提交补证</button>
+    <span id="message"></span>
+  </div>
+  <h2>赔案清单</h2>
+  <table>
+    <thead>
+      <tr><th>记录号</th><th>赔案号</th><th>状态</th><th>核定损失</th><th>摊回金额</th><th>支付参考</th></tr>
+    </thead>
+    <tbody id="claims"></tbody>
+  </table>
+  <h2>报案与补证历史</h2>
+  <table>
+    <thead>
+      <tr><th>时间</th><th>类型</th><th>操作人</th><th>预估总损失</th><th>说明</th></tr>
+    </thead>
+    <tbody id="entries"></tbody>
+  </table>
+</main>
+<script>
+const viewHeaders = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
+const claimsHeaders = {"X-User-Id":"demo-claims","X-Role":"claims_officer","X-Org":"demo","Content-Type":"application/json"};
+const fmt = n => Number(n || 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const eventPk = new URLSearchParams(location.search).get("id");
+let current = null;
+
+function render(data) {
+  current = data;
+  const pending = data.event.status === "pending_supplementation";
+  document.getElementById("overview").innerHTML =
+    "<p><strong>" + data.event.event_id + '</strong> <span class="' + (pending ? "pending" : "normal") + '">' +
+    (pending ? "待补证" : "正常") + "</span><br>发生时刻：" + data.event.occurred_at +
+    "<br>报送人：" + data.event.reported_by + "<br>预估总损失：" + fmt(data.event.estimated_total_loss) + "</p>";
+  const b = data.balance, s = data.summary;
+  const cards = [
+    ["合约层容量", fmt(b.layer_capacity)], ["已承诺摊回", fmt(b.committed_recoverable)],
+    ["容量余额", fmt(b.remaining_capacity)], ["待补证金额", fmt(b.excess_amount)],
+    ["未结金额", fmt(s.outstanding_amount)], ["已结算摊回", fmt(s.settled_total)],
+    ["赔案数", s.claim_count]
+  ];
+  document.getElementById("balance").innerHTML = cards.map(c =>
+    '<div class="card"><div>' + c[0] + '</div><div class="num">' + c[1] + "</div></div>").join("");
+  document.getElementById("claims").innerHTML = (data.claims || []).map(c =>
+    "<tr><td>" + c.reference + "</td><td>" + c.claim_number + "</td><td>" + c.state + "</td><td>" +
+    (c.approved_loss == null ? "-" : fmt(c.approved_loss)) + "</td><td>" + fmt(c.recoverable_amount) + "</td><td>" +
+    (c.payment_reference || "-") + "</td></tr>").join("");
+  document.getElementById("entries").innerHTML = (data.entries || []).map(e =>
+    "<tr><td>" + e.created_at + "</td><td>" + (e.kind === "report" ? "报案" : "补证") + "</td><td>" + e.actor_id +
+    "</td><td>" + fmt(e.estimated_total_loss) + "</td><td>" + (e.note || "") + "</td></tr>").join("");
+}
+
+async function load() {
+  const response = await fetch("/api/events/" + eventPk, {headers: viewHeaders});
+  const data = await response.json();
+  if (!response.ok) { document.getElementById("message").textContent = data.message || "加载失败"; return; }
+  render(data);
+}
+
+document.getElementById("supplement").onclick = async () => {
+  const message = document.getElementById("message");
+  message.textContent = "";
+  if (!current) return;
+  const body = {expected_version: current.event.version, data: {
+    estimated_total_loss: parseFloat(document.getElementById("new_estimate").value),
+    note: document.getElementById("note").value
+  }};
+  const response = await fetch("/api/events/" + eventPk + "/actions/supplement",
+    {method: "POST", headers: claimsHeaders, body: JSON.stringify(body)});
+  const data = await response.json();
+  if (!response.ok) { message.textContent = data.message || "补证失败"; return; }
+  load();
+};
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>事件通知台账 - 再保险合约与巨灾暴露管理</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
+    main { max-width: 1080px; margin: auto; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border: 1px solid #d7dee6; padding: .45rem .6rem; text-align: left; font-size: .92rem; }
+    th { background: #f4f6f8; }
+    button { padding: .55rem .9rem; cursor: pointer; }
+    input { padding: .45rem; }
+    .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    .pending { color: #b23b3b; font-weight: 600; }
+    .normal { color: #1c7a3d; font-weight: 600; }
+    #message { color: #b23b3b; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>巨灾事件通知台账</h1>
+  <p><a href="/">返回首页</a></p>
+  <h2>首次报案登记</h2>
+  <div class="row">
+    <input id="event_id" placeholder="事件号 如CAT-2026-01">
+    <label>发生时刻 <input id="occurred_at" type="datetime-local"></label>
+    <input id="estimated" type="number" min="0" step="0.01" placeholder="预估总损失">
+    <button id="report">登记报案</button>
+    <span id="message"></span>
+  </div>
+  <h2>事件汇总</h2>
+  <button id="reload">刷新台账</button>
+  <table>
+    <thead>
+      <tr><th>事件号</th><th>发生时刻</th><th>报送人</th><th>预估总损失</th><th>合约层容量</th><th>容量余额</th><th>待补证金额</th><th>未结金额</th><th>赔案数</th><th>状态</th><th></th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const viewHeaders = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
+const claimsHeaders = {"X-User-Id":"demo-claims","X-Role":"claims_officer","X-Org":"demo","Content-Type":"application/json"};
+const fmt = n => Number(n || 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+async function load() {
+  const response = await fetch("/api/events", {headers: viewHeaders});
+  const data = await response.json();
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  for (const item of data.items || []) {
+    const pending = item.status === "pending_supplementation";
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" + item.event_id + "</td><td>" + item.occurred_at + "</td><td>" + item.reported_by + "</td>" +
+      "<td>" + fmt(item.estimated_total_loss) + "</td><td>" + fmt(item.balance.layer_capacity) + "</td>" +
+      "<td>" + fmt(item.balance.remaining_capacity) + "</td><td>" + fmt(item.balance.excess_amount) + "</td>" +
+      "<td>" + fmt(item.summary.outstanding_amount) + "</td><td>" + item.summary.claim_count + "</td>" +
+      '<td class="' + (pending ? "pending" : "normal") + '">' + (pending ? "待补证" : "正常") + "</td>" +
+      '<td><a href="/event?id=' + item.id + '">详情</a></td>';
+    rows.appendChild(tr);
+  }
+}
+
+document.getElementById("reload").onclick = load;
+document.getElementById("report").onclick = async () => {
+  const message = document.getElementById("message");
+  message.textContent = "";
+  const body = {data: {
+    event_id: document.getElementById("event_id").value,
+    occurred_at: document.getElementById("occurred_at").value,
+    estimated_total_loss: parseFloat(document.getElementById("estimated").value)
+  }};
+  const response = await fetch("/api/events", {method: "POST", headers: claimsHeaders, body: JSON.stringify(body)});
+  const data = await response.json();
+  if (!response.ok) { message.textContent = data.message || "登记失败"; return; }
+  load();
+};
+load();
+</script>
+</body>
+</html>

@@ -12,6 +12,8 @@ from .domain import Actor, DomainError, PermissionDenied, ValidationError
 RECORD_RE = re.compile(r"^/api/records/(\d+)$")
 ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
 AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+EVENT_RE = re.compile(r"^/api/events/(\d+)$")
+EVENT_ACTION_RE = re.compile(r"^/api/events/(\d+)/actions/([a-z_]+)$")
 
 
 def make_handler(service: Any, static_dir: Path):
@@ -71,6 +73,21 @@ def make_handler(service: Any, static_dir: Path):
                     page = (static_dir / "index.html").read_bytes()
                     self._send(200, page, "text/html; charset=utf-8")
                     return
+                if parsed.path == "/events":
+                    page = (static_dir / "events.html").read_bytes()
+                    self._send(200, page, "text/html; charset=utf-8")
+                    return
+                if parsed.path == "/event":
+                    page = (static_dir / "event.html").read_bytes()
+                    self._send(200, page, "text/html; charset=utf-8")
+                    return
+                if parsed.path == "/api/events":
+                    self._send(200, {"items": service.list_events(self._actor())})
+                    return
+                match = EVENT_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.get_event(self._actor(), int(match.group(1))))
+                    return
                 if parsed.path == "/api/records":
                     query = parse_qs(parsed.query)
                     records = service.list_records(self._actor(), state=query.get("state", [None])[0], limit=int(query.get("limit", ["100"])[0]))
@@ -98,6 +115,20 @@ def make_handler(service: Any, static_dir: Path):
                 if parsed.path == "/api/records":
                     record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
                     self._send(201, record)
+                    return
+                if parsed.path == "/api/events":
+                    event = service.report_event(self._actor(), body.get("data", body))
+                    self._send(201, event)
+                    return
+                match = EVENT_ACTION_RE.match(parsed.path)
+                if match:
+                    if match.group(2) != "supplement":
+                        raise ValidationError("未知事件操作")
+                    version = body.get("expected_version")
+                    if not isinstance(version, int):
+                        raise ValidationError("expected_version必须是整数")
+                    result = service.supplement_event(self._actor(), int(match.group(1)), version, body.get("data", {}))
+                    self._send(200, result)
                     return
                 match = ACTION_RE.match(parsed.path)
                 if match:
